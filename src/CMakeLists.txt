@@ -16,9 +16,27 @@ if (APPLE AND ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
 endif()
 
 set(MAYA_ANIMATION_INCLUDE ${PROJECT_SOURCE_DIR}/src CACHE INTERNAL "${PROJECT_NAME}: Include Directories" FORCE)
-add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES})
+if (ANIMX_BUILD_SHARED)
+    add_library(${PROJECT_NAME}_shared SHARED ${SOURCE_FILES})
+    set_target_properties(${PROJECT_NAME}_shared PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
+endif()
+if (ANIMX_BUILD_STATIC)
+    add_library(${PROJECT_NAME}_static STATIC ${SOURCE_FILES})
+    set_target_properties(${PROJECT_NAME}_static PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
+    if (MSVC)
+        set_target_properties(${PROJECT_NAME}_static PROPERTIES PREFIX lib)
+    endif()
+endif()
 
-install(TARGETS ${PROJECT_NAME}
-	ARCHIVE DESTINATION .
-	LIBRARY DESTINATION .
-	RUNTIME DESTINATION .)
+if (ANIMX_BUILD_SHARED)
+    install(TARGETS ${PROJECT_NAME}_shared
+        ARCHIVE DESTINATION .
+        LIBRARY DESTINATION .
+        RUNTIME DESTINATION .)
+endif()
+if (ANIMX_BUILD_STATIC)
+    install(TARGETS ${PROJECT_NAME}_static
+        ARCHIVE DESTINATION .
+        LIBRARY DESTINATION .
+        RUNTIME DESTINATION .)
+endif()

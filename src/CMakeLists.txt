@@ -28,15 +28,17 @@ if (ANIMX_BUILD_STATIC)
     endif()
 endif()
 
+install(FILES animx.h DESTINATION include)
+
 if (ANIMX_BUILD_SHARED)
     install(TARGETS ${PROJECT_NAME}_shared
-        ARCHIVE DESTINATION .
+        ARCHIVE DESTINATION lib
         LIBRARY DESTINATION .
-        RUNTIME DESTINATION .)
+        RUNTIME DESTINATION bin)
 endif()
 if (ANIMX_BUILD_STATIC)
     install(TARGETS ${PROJECT_NAME}_static
-        ARCHIVE DESTINATION .
+        ARCHIVE DESTINATION lib
         LIBRARY DESTINATION .
-        RUNTIME DESTINATION .)
+        RUNTIME DESTINATION bin)
 endif()

@@ -2,10 +2,14 @@
 #define ANIM_X
 
 #ifdef WIN32
-    #ifdef MAYA_ANIMATION_DLL_EXPORT
-        #define DLL_EXPORT extern "C" __declspec(dllexport)
+    #ifdef ANIMX_STATIC
+         #define DLL_EXPORT extern "C"
     #else
-        #define DLL_EXPORT extern "C" __declspec(dllimport)
+        #ifdef ANIMX_EXPORT
+            #define DLL_EXPORT extern "C" __declspec(dllexport)
+        #else
+            #define DLL_EXPORT extern "C" __declspec(dllimport)
+        #endif
     #endif
 #else
     #define DLL_EXPORT extern "C"

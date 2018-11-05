@@ -1,5 +1,3 @@
-#define MAYA_ANIMATION_DLL_EXPORT
-
 #include <cassert>
 #include <cmath>
 #include <cstdlib>

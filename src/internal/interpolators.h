@@ -148,33 +148,59 @@ namespace adsk
             double fY3 = y2;
             double fX4 = endX;
             double fY4 = endY;
-
-            // Compute the difference between the 2 keyframes.          
+            double fCoeff[4];
+            /*	
+            *	Compute the difference between the 2 keyframes.					
+            */
             double dx = fX4 - fX1;
             double dy = fY4 - fY1;
 
-            // Compute the tangent at the start of the curve segment.
-            double tan_x = fX2 - fX1;
-            double m1 = 0.0;
-            if (tan_x != 0.0) {
-                m1 = (fY2 - fY1) / tan_x;
+            // tangent of key0
+            double tx0 = fX2 - fX1;
+            double ty0 = fY2 - fY1;
+
+            // tangent of key1
+            double tx1 = fX4 - fX3;
+            double ty1 = fY4 - fY3;
+
+            constexpr double epsilon = 2e-7; // magic number from testing
+            // This is very important for Time->Time curves, because X is in the unit of seconds, and Y is in the unit of ticks
+            // Where the conversion rate is about 1e9
+            // If they are parallel, this is a line segment, don't try fitting it into a cubic curve
+            if (equivalent(dx*ty0, dy*tx0, fabs(epsilon*dx*ty0)) && equivalent(dx*ty1, dy*tx1, fabs(epsilon*dx*ty1)))
+            {
+                fCoeff[0] = 0;
+                fCoeff[1] = 0;
+                fCoeff[2] = dy/dx;
+                fCoeff[3] = fY1;
+            } else {
+                /* 
+                * 	Compute the tangent at the start of the curve segment.			
+                */
+                double tan_x = tx0;
+                double m1 = 0.0;
+                if (tan_x != 0.0) {
+                    m1 = ty0 / tan_x;
+                }
+
+                tan_x = tx1;
+                double m2 = 0.0;
+                if (tan_x != 0.0) {
+                    m2 = ty1 / tan_x;
+                }
+
+                double length = 1.0 / (dx * dx);
+                double double1 = dx * m1;
+                double double2 = dx * m2;
+                /*	fCoeff[0] = (dx * (m2 + m1) - 2.0 * dy) / (dx * dx *dx)			*/
+                /*	fCoeff[1] = ( 3.0*dy - dx*(2.0*m1 + m2) ) / (dx * dx)			*/
+                /* 	fCoeff[2] = m1													*/
+                /* 	fCoeff[3] = v1													*/
+                fCoeff[0] = (double1 + double2 - dy - dy) * length / dx;
+                fCoeff[1] = (dy + dy + dy - double1 - double1 - double2) * length;
+                fCoeff[2] = m1;
+                fCoeff[3] = fY1;
             }
-
-            tan_x = fX4 - fX3;
-            double m2 = 0.0;
-            if (tan_x != 0.0) {
-                m2 = (fY4 - fY3) / tan_x;
-            }
-
-            double length = 1.0 / (dx * dx);
-            double double1 = dx * m1;
-            double double2 = dx * m2;
-            double fCoeff[4];
-
-            fCoeff[0] = (double1 + double2 - dy - dy) * length / dx;
-            fCoeff[1] = (dy + dy + dy - double1 - double1 - double2) * length;
-            fCoeff[2] = m1;
-            fCoeff[3] = fY1;
 
             double t = time - fX1;
             double val = t * (t * (t * fCoeff[0] + fCoeff[1]) + fCoeff[2]) + fCoeff[3];

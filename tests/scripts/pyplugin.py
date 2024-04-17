@@ -29,7 +29,7 @@ def frange(start, end=None, inc=None):
     return L
 
 
-def testCurves():
+def testCurves(precision=13, measureError=True):
     """
     Testing suite function that will generate a random animation for a cube and run
     checks whether the values evaluated by the animation library match Maya's. The test
@@ -53,39 +53,48 @@ def testCurves():
         cmds.setKeyframe(name)
 
     def testInfinities(curves):
-        print '\nTESTING INFINITY MODES\n'
+        print ('\nTESTING INFINITY MODES\n')
         errors = 0
         for inf in ['constant', 'linear', 'cycle', 'cycleRelative', 'oscillate']:
-            print "### Checking {} infinity mode".format(string.upper(inf))
+            print ("### Checking {} infinity mode".format(inf.upper()))
             for curve in curves:
                 cmds.setInfinity(curve, pri=inf, poi=inf)               
-                errors += verifyCurve(curve)
+                errors += verifyCurve(curve, precision=precision, measureError=measureError)
         return errors
 
     def testTangents(curves):
-        print '\nTESTING TANGENT TYPES\n'
+        print ('\nTESTING TANGENT TYPES\n')
         errors = 0
-        for tan in ['linear','fast','slow','flat','step','stepnext','fixed','clamped','plateau','spline']:
-            print "### Checking {} tangent mode".format(string.upper(tan))
+        for tan in ['fixed', 'auto', 'autoease', 'automix', 'linear','fast','slow','flat','step','stepnext','fixed','clamped','plateau','spline']:
+            print ("### Checking {} tangent mode (non-weighted)".format(tan.upper()))
             cmds.keyTangent(curves, edit=True, time=(':',), itt=tan, ott=tan)
+            cmds.keyTangent(curves, edit=True, weightedTangents=False)   
+            # Note: we specify to recalculate tangents to test that autoTangents are working correctly
             for curve in curves:
-                errors += verifyCurve(curve)
+                errors += verifyCurve(curve, precision=precision, measureError=measureError, recalcTangents=True)
+        
+            print ("### Checking {} tangent mode (weighted)".format(tan.upper()))
+            cmds.keyTangent(curves, edit=True, weightedTangents=True)   
+            for curve in curves:
+                errors += verifyCurve(curve, precision=precision, measureError=measureError, recalcTangents=True)
+        cmds.keyTangent(curves, edit=True, weightedTangents=False)  
         return errors
 
     def testInterpolation(curves):
-        print '\nTESTING INTERPOLATION MODES\n'
+        print ('\nTESTING INTERPOLATION MODES\n')
         errors = 0
         for interp in ['none', 'euler', 'quaternion', 'quaternionSlerp', 'quaternionSquad']:
-            print "### Checking {} interpolation mode".format(string.upper(interp))
+            print ("### Checking {} interpolation mode".format(interp.upper()))
             for curve in curves:
                 cmds.rotationInterpolation(curve, convert=interp)              
-                errors += verifyCurve(curve)
+                errors += verifyCurve(curve, precision=precision, measureError=measureError, recalcTangents=False)
         return errors
 
     # Create a new scene and add a cube with random simulation
     cmds.file(f=True, new=True)
     name = 'cube'
     cmds.polyCube(name=name)
+    rand.seed(567)
     for t in range(-10, 40, 10):
         setRandomKey(name, t)
 
@@ -94,15 +103,17 @@ def testCurves():
     curves = rotCurves + [name + '_translateX', name + '_visibility']
 
     errors = 0
+    print (f'\nTESTING CURVES, precision = {precision}\n')
     errors += testInfinities(curves)
     errors += testTangents(curves)
     errors += testInterpolation(rotCurves)
-    print "\nTotal errors: {}".format(errors)
+    print ("\nTotal errors: {}".format(errors))
 
 
-def verifyCurve(curve):
+
+def verifyCurve(curve, precision=12, measureError=True, recalcTangents=False):
     if not cmds.objectType(curve, isAType='animCurve'):
-        print '{} is not a param curve'.format(curve)
+        print ('{} is not a param curve'.format(curve))
         return False
 
     # find out the time range of the curve
@@ -113,30 +124,36 @@ def verifyCurve(curve):
     extends = 10
     last += extends
     first -= extends
-    n = last - first
-    steps = n
     step = 1
+    apiValues = cmds.AnimX(curve, start=first, stop=last-0.0001, step=step, mer=measureError, rtn=recalcTangents)
 
-    apiValues = cmds.AnimX(curve, start=first, stop=last-0.0001, step=step)
-
-    sceneValues = []
     index = 0
     errors = 0
-    for i in frange(first, last, step):
-        cmds.currentTime(i)
-        v = cmds.getAttr(curve+".output")
-        sceneValues.append( v )
+        
+    if measureError:
+        errTol = pow(10.0, -precision)
+        for i in frange(first, last, step):
+            if (abs(apiValues[index]) > errTol):
+                print ("Error. Mismatch for {}[{}]. difference: {}".format(curve, int(i), apiValues[index]))
+                errors += 1
+            index += 1
+    else:
+        sceneValues = []
+        for i in frange(first, last, step):
+            cmds.currentTime(i)
+            v = cmds.getAttr(curve+".output")
+            sceneValues.append( v )
 
-        v1 = round(apiValues[index], 5)
-        v2 = round(v, 5)
-        if v1 != v2:
-            print "Error. Mismatch for {}[{}]. API:{} vs. Maya:{}".format(curve, int(i), v1, v2)
-            errors += 1
-        index += 1
+            v1 = round(apiValues[index], precision)
+            v2 = round(v, precision)
+            if v1 != v2:
+                print ("Error. Mismatch for {}[{}]. API: {} vs. Maya: {}".format(curve, int(i), v1, v2))
+                errors += 1
+            index += 1
 
-    if len(apiValues) < len(sceneValues):
-        print "Error. {}: Values count for api ({}) does not equal that of the scene ({})".format(curve, len(apiValues), len(sceneValues))
-        return False
+        if len(apiValues) < len(sceneValues):
+            print ("Error. {}: Values count for api ({}) does not equal that of the scene ({})".format(curve, len(apiValues), len(sceneValues)))
+            return False
 
     return errors
 

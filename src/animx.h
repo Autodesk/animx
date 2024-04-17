@@ -23,10 +23,10 @@ namespace adsk
     typedef float  seconds;
 #endif
 
-    //! Defines span interpolation method determined by the tangents of boundary keys TODO: difference between this and the next enum
+    //! Defines span interpolation method determined by the tangents of boundary keys
     enum class SpanInterpolationMethod
     {
-        Bezier,     //!< Bezier
+        Curve,      //!< Bezier/Hermite/... 
         Linear,     //!< Linear
         Step,       //!< Step
         StepNext    //!< StepNext
@@ -64,7 +64,10 @@ namespace adsk
         Fast,       //!< Fast
         Smooth,     //!< Smooth
         Clamped,    //!< Clamped
+
         Auto,       //!< Auto
+		AutoMix,	//!< AutoMix
+		AutoEase,	//!< AutoEase
 
         Sine,       //!< Sine
         Parabolic,  //!< Parabolic
@@ -115,6 +118,11 @@ namespace adsk
         double value;               //!< Value
     };
 
+    inline bool isAutoTangentType(TangentType t)
+    {
+        return t == TangentType::Auto || t == TangentType::AutoMix || t == TangentType::AutoEase;
+    }
+
     //! Keyframe
     struct Keyframe : public KeyTimeValue
     {
@@ -132,7 +140,7 @@ namespace adsk
                 return SpanInterpolationMethod::Step;
             if (tanOut.type == TangentType::StepNext)
                 return SpanInterpolationMethod::StepNext;
-            return SpanInterpolationMethod::Bezier;
+            return SpanInterpolationMethod::Curve;
         }
 
         CurveInterpolatorMethod curveInterpolationMethod(bool isWeighted) const
@@ -172,6 +180,7 @@ namespace adsk
     class ICurve
     {
     public:
+        virtual ~ICurve() { }
         /*!
             Returns a key at a particular index, if valid. False otherwise.
         */
@@ -358,7 +367,8 @@ namespace adsk
         \param[in] tanY Output tangent Y value
     */
     DLL_EXPORT void autoTangent(
-        bool calculateInTangent, 
+        bool calculateInTangent,
+        TangentType tangentType, 
         KeyTimeValue key, 
         KeyTimeValue *prevKey, 
         KeyTimeValue *nextKey, 

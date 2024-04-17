@@ -7,6 +7,8 @@
 #include "internal/math.h"
 #include "internal/interpolators.h"
 
+#define _SIGN(x) (((x)<0.0)?-1:1)
+
 namespace adsk
 {
     //! Utility functions to perform interpolation between two keys
@@ -111,7 +113,7 @@ namespace adsk
 
         // for Bezier interpolation we might need to drop the precision
         // in case not using 64-bit time precision
-        if (prev.spanInterpolationMethod() == SpanInterpolationMethod::Bezier)
+        if (prev.spanInterpolationMethod() == SpanInterpolationMethod::Curve)
         {
             time = (seconds)time;
             prev.time = (seconds)prev.time;
@@ -142,7 +144,7 @@ namespace adsk
         double result = 0.0;
         switch (interpolationMethod)
         {
-        case SpanInterpolationMethod::Bezier:
+        case SpanInterpolationMethod::Curve:
             switch (curveInterpolatorMethod)
             {
             case CurveInterpolatorMethod::Bezier:
@@ -645,38 +647,157 @@ namespace adsk
         return value;
     }
 
+    void validateTangent(CurveInterpolatorMethod curveInterpolationMethod,
+                          seconds &newTanX, seconds &newTanY)
+    {
+        if (curveInterpolationMethod == CurveInterpolatorMethod::Hermite) {
+            // non-weighted tangents are normalized
+            seconds length = sqrt(newTanX*newTanX + newTanY * newTanY);
+            if (length > 0)
+            {
+                newTanX /= length;
+                newTanY /= length;
+            }
+        } else if (curveInterpolationMethod == CurveInterpolatorMethod::Bezier) {
+            if (newTanX < 0)
+                newTanX = 0;
+        }
+    }   
+
+    void
+    _autoTangent(
+                seconds & newTanX, 
+                seconds& newTanY,
+                bool calculateInTangent,
+                seconds x, seconds px, seconds nx,
+                seconds y, seconds py, seconds ny,
+                TangentType tangentType)
+    {
+        // prevSlope3 and nextSlope3 are respectively the slopes to the left and right keys multiplied by 3.
+        // Target slope needs to be adjusted to fit between these 2 last slope values to ensure that the
+        // control points are not outside of the Y range defined by the prev and next keys
+        constexpr static const float kEaseCoefficient = -0.5f;
+
+        double targetSlope = 0.0;
+        double prevSlope3 = 3.0 * (  y - py ) / (  x - px );
+        double nextSlope3 = 3.0 * ( ny -  y ) / ( nx -  x );
+
+        // Default is ease
+        //
+        if( tangentType == TangentType::Auto ){
+            // Legacy auto tangents - Target slope is the default spline slope.
+            //
+            targetSlope = ( ny - py ) /  ( nx - px );
+        } else {
+            // Interpolated auto tangent
+            //
+            double prevSlope = (  y - py ) / (  x - px );
+            double nextSlope = ( ny -  y ) / ( nx -  x );
+            double f = (x-px)/(nx-px);
+            if( tangentType == TangentType::AutoMix ){
+                // Linear interpolation
+                //
+                targetSlope = (1-f)*prevSlope + f*nextSlope;
+            } else { // tangentType == TangentType::AutoEase 
+                // Cubic interpolation
+                //
+                // 
+                // This is a family of cubic functions g with c in [-1/2,1], and
+                // f in [0,1]
+                //
+                // g(c,f) = 0.5 + (f-0.5)*(1-c+4*c*(f-0.5)^2)
+                //
+                float c = kEaseCoefficient;
+                // Ease interpolation - this is the cubic interpolation that
+                // uses the coefficient that gives the strongest influence to
+                // its closest neighbor.
+                //
+                double f_minus_half = f - 0.5;
+                double f_minus_half_squared = f_minus_half*f_minus_half;
+
+                // Map f using g:
+                //
+                double g = 0.5 + f_minus_half*(1-c+4*c*f_minus_half_squared);
+
+                // Now use g instead of f to interpolate
+                //
+                targetSlope = (1-g)*prevSlope + g*nextSlope;
+            }
+        }
+
+        // Clamp
+        //
+        if ( _SIGN( prevSlope3 ) != _SIGN( nextSlope3) ||
+            _SIGN( targetSlope ) != _SIGN( nextSlope3 ) )
+        {
+            targetSlope = 0.0;
+        }
+        else if ( nextSlope3 >= 0 )
+        {
+            targetSlope = std::min(std::min(targetSlope, nextSlope3), prevSlope3);
+        }
+        else
+        {
+            targetSlope = std::max(std::max(targetSlope, nextSlope3), prevSlope3);
+        }
+
+        // Find the x tangent value
+        // No need to divide by 3 since the interpolator code does this already
+        if ( calculateInTangent )
+            newTanX = ( x - px );
+        else
+            newTanX = ( nx - x );
+    
+        // Find the y tangent value
+        newTanY = targetSlope * newTanX;
+    }
+
+    void flatTangent(bool calculateInTangent, 
+                     KeyTimeValue key, const KeyTimeValue *prevKey, const KeyTimeValue *nextKey,
+                     CurveInterpolatorMethod curveInterpolationMethod,
+                     seconds &newTanX, seconds &newTanY)
+    {
+        seconds tanInx = 0.0, tanIny = 0.0;
+        seconds tanOutx = 0.0, tanOuty = 0.0;
+        seconds x = (seconds)key.time;
+
+        if (prevKey != nullptr)
+            tanInx = x - seconds(prevKey->time);
+        
+        if (nextKey != nullptr)
+            tanOutx = seconds(nextKey->time) - x;
+        
+        if (prevKey == nullptr)
+            tanInx = tanOutx;
+        
+        if (nextKey == nullptr)
+            tanOutx = tanInx;
+        
+        if (calculateInTangent)
+        {
+            newTanX = tanInx;
+            newTanY = tanIny;
+        }
+        else
+        {
+            newTanX = tanOutx;
+            newTanY = tanOuty;
+        }
+
+        validateTangent(curveInterpolationMethod, newTanX, newTanY);
+    }
+
     //! Compute tangent values for a key with Auto tangent type
-    void autoTangent(bool calculateInTangent, KeyTimeValue key, KeyTimeValue *prevKey, KeyTimeValue *nextKey, CurveInterpolatorMethod curveInterpolationMethod, seconds &tanX, seconds &tanY)
+    void autoTangent(bool calculateInTangent,
+                    TangentType tangentType,
+                    KeyTimeValue key, KeyTimeValue *prevKey, KeyTimeValue *nextKey, 
+                    CurveInterpolatorMethod curveInterpolationMethod,
+                    seconds &newTanX, seconds &newTanY)
     {
         if (prevKey == nullptr || nextKey == nullptr)
         {
             // calculate flat tangent
-            seconds tanInx = 0.0, tanIny = 0.0;
-            seconds tanOutx = 0.0, tanOuty = 0.0;
-            seconds x = (seconds)key.time;
-
-            if (prevKey != nullptr)
-                tanInx = x - seconds(prevKey->time);
-            
-            if (nextKey != nullptr)
-                tanOutx = seconds(nextKey->time) - x;
-            
-            if (prevKey == nullptr)
-                tanInx = tanOutx;
-            
-            if (nextKey == nullptr)
-                tanOutx = tanInx;
-            
-            if (calculateInTangent)
-            {
-                tanX = tanInx;
-                tanY = tanIny;
-            }
-            else
-            {
-                tanX = tanOutx;
-                tanY = tanOuty;
-            }
+            flatTangent(calculateInTangent, key, prevKey, nextKey, curveInterpolationMethod, newTanX, newTanY);
         }
         else
         {
@@ -686,52 +807,11 @@ namespace adsk
             seconds nx = (seconds)nextKey->time;
             double py = prevKey->value;
             double ny = nextKey->value;
-            
-            if (calculateInTangent)
-                tanX = (seconds)(x - px);
-            else
-                tanX = (seconds)(nx - x);
 
-            double targetSlope = 0.0, prevSlope3 = 0.0, nextSlope3 = 0.0;
-
-            // Target slope is the default spline slope.
-            // prevSlope3 and nextSlope3 are respectively the slopes to the left and right keys multiplied by 3.
-            // Target slope needs to be adjusted to fit between these 2 last slope values to ensure that the
-            // control points are not outside of the Y range defined by the prev and next keys
-
-            targetSlope = (ny - py) / (nx - px);
-            prevSlope3 = 3.0 * (y - py) / (x - px);
-            nextSlope3 = 3.0 * (ny - y) / (nx - x);
-
-            if (signNoZero(prevSlope3) != signNoZero(nextSlope3) ||
-                signNoZero(targetSlope) != signNoZero(nextSlope3))
-            {
-                targetSlope = 0.0;
-            }
-            else if (nextSlope3 >= 0)
-            {
-                targetSlope = std::min(std::min(targetSlope, nextSlope3), prevSlope3);
-            }
-            else
-            {
-                targetSlope = std::max(std::max(targetSlope, nextSlope3), prevSlope3);
-            }
-            tanY = (seconds)(targetSlope * tanX);			
+            _autoTangent(newTanX, newTanY, calculateInTangent, x, px, nx, y, py, ny, tangentType);
+            validateTangent(curveInterpolationMethod, newTanX, newTanY);
         }
-
-        if (tanX < 0)
-            tanX = 0;
-
-        if (curveInterpolationMethod == CurveInterpolatorMethod::Hermite)
-        {
-            seconds length = sqrt(tanX*tanX + tanY * tanY);
-            if (length > 0)
-            {
-                tanX /= length;
-                tanY /= length;
-            }
-        }
-    }	
+    }
 }
 
 

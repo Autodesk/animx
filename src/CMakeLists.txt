@@ -12,7 +12,7 @@ set(SOURCE_FILES
 )
 
 if (APPLE AND ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
-   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -stdlib=libstdc++")
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
 endif()
 
 set(MAYA_ANIMATION_INCLUDE ${PROJECT_SOURCE_DIR}/src CACHE INTERNAL "${PROJECT_NAME}: Include Directories" FORCE)

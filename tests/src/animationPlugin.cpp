@@ -19,6 +19,10 @@ using namespace adsk;
 #define kStopFlagLong  "-stop"
 #define kStepFlag      "-i"
 #define kStepFlagLong  "-step"
+#define kRecalcTangentsFlag     "-rtn"
+#define kRecalcTangentsFlagLong "-recalcTangents"
+#define kMeasureErrorFlag       "-mer"
+#define kMeasureErrorFlagLong   "-measureError"
 
 #ifdef WIN32
 #define PLUGIN_DLL_EXPORT extern "C" __declspec(dllexport)
@@ -26,6 +30,21 @@ using namespace adsk;
 #define PLUGIN_DLL_EXPORT extern "C"
 #endif
 
+bool isUnitlessInputCurve(const MFnAnimCurve& curve)
+{
+    MFnAnimCurve::AnimCurveType ct = curve.animCurveType();
+    return (ct == MFnAnimCurve::kAnimCurveUA || ct == MFnAnimCurve::kAnimCurveUL || ct == MFnAnimCurve::kAnimCurveUT || ct == MFnAnimCurve::kAnimCurveUU);
+}
+
+bool isAngleOutputCurve(const MFnAnimCurve& curve)
+{
+    return (curve.animCurveType() == MFnAnimCurve::kAnimCurveUA || curve.animCurveType() == MFnAnimCurve::kAnimCurveTA);
+}
+
+double getTimeValue(const MFnAnimCurve& curve, int index)
+{
+    return isUnitlessInputCurve(curve) ? curve.unitlessInput(index) : curve.time(index).as(MTime::kSeconds);
+}
 
 class AnimXCommand : public MPxCommand 
 {
@@ -46,12 +65,14 @@ public:
         syntax.addFlag(kStartFlag, kStartFlagLong, MSyntax::kTime);
         syntax.addFlag(kStopFlag, kStopFlagLong, MSyntax::kTime);
         syntax.addFlag(kStepFlag, kStepFlagLong, MSyntax::kTime);
+        syntax.addFlag(kRecalcTangentsFlag, kRecalcTangentsFlagLong, MSyntax::kNoArg);
+        syntax.addFlag(kMeasureErrorFlag, kMeasureErrorFlagLong, MSyntax::kNoArg);
         syntax.addArg(MSyntax::kString);
         return syntax;
     }
 
 private:
-    MStatus parseArgs(const MArgList &args, MTime &start, MTime &stop, MTime &step)
+    MStatus parseArgs(const MArgList &args, MTime &start, MTime &stop, MTime &step, bool& measureError, bool& recalcTangents)
     {
         MStatus status;
         MArgDatabase argData(syntax(), args, &status);
@@ -61,6 +82,8 @@ private:
             argData.getFlagArgument(kStopFlag, 0, stop);
         if (argData.isFlagSet(kStepFlag))
             argData.getFlagArgument(kStepFlag, 0, step);
+        measureError = argData.isFlagSet(kMeasureErrorFlag);
+        recalcTangents = argData.isFlagSet(kRecalcTangentsFlag);
         return status;
     }
 };                                  
@@ -95,7 +118,8 @@ MStatus uninitializePlugin(MObject _obj)
 class TparamCurveAccessor : public ICurve
 {
 public:
-    TparamCurveAccessor(MString curveName) 
+    TparamCurveAccessor(MString curveName, bool recalcTangents=false) 
+        : fRecalcTangents(recalcTangents)
     { 
         MSelectionList list;
         list.add(curveName);
@@ -144,51 +168,54 @@ public:
         if (index < 0 || index >= (int)curve.numKeys())
             return false;
 
+        bool unitlessInput = isUnitlessInputCurve(curve);
+    
         key.index = index;
-        key.time = curve.time(index).as(MTime::kSeconds);
+        key.time = getTimeValue(curve, index); // curve.time(index).as(MTime::kSeconds);
         key.value = curve.value(index);
-        
-        // fetch tangent values using python command instead OpenMaya interface because
-        // the latter casts down the values to float which loses precision in 64 bit time mode
-        MStringArray results;
-        MString cmd = MString("cmds.keyTangent('" + curve.name() + "', q=1, index=(" + index + ",), ix=1, ox=1, iy=1, oy=1)");
-        MGlobal::executePythonCommand(cmd, results);
-
         key.tanIn.type = tangentType(curve.inTangentType(index));
-        key.tanIn.x = (seconds)results[0].asDouble();
-        key.tanIn.y = (seconds)results[2].asDouble();
-
         key.tanOut.type = tangentType(curve.outTangentType(index));
-        key.tanOut.x = (seconds)results[1].asDouble();
-        key.tanOut.y = (seconds)results[3].asDouble();
+        MFnAnimCurve::TangentValue kix, kiy;
+	    MFnAnimCurve::TangentValue kox, koy;
+	    curve.getTangent(index, kix, kiy, true);
+	    curve.getTangent(index, kox, koy, false);
+        key.tanIn.x = kix;
+        key.tanIn.y = kiy;
+        key.tanOut.x = kox;
+        key.tanOut.y = koy;
 
         key.linearInterpolation = false;
         key.quaternionW = 1.0;
 
-        // for auto tangents, calculate the value on the fly based on the previous and the next key
-        if (key.tanIn.type == TangentType::Auto || key.tanOut.type == TangentType::Auto)
-        {			
-            bool hasPrev = index > 0;
-            bool hasNext = index < (int)curve.numKeys() - 1;
-            Keyframe prev, next;
-            if (hasPrev)
-            {
-                prev.time = curve.time(index - 1).as(MTime::kSeconds);
-                prev.value = curve.value(index - 1);
-            }
-            if (hasNext)
-            {
-                next.time = curve.time(index + 1).as(MTime::kSeconds);
-                next.value = curve.value(index + 1);
-            }
+        if (fRecalcTangents) {
+            // Recalculate tangents based on the tangentType instead of using the tangents provided by the Maya curve
+            // So far, this only works for a select few tangent types.
 
-            CurveInterpolatorMethod interp = key.curveInterpolationMethod(isWeighted());
+            // Handle keys with auto tangents: calculate the tangents based on the previous and the next key
+            if (isAutoTangentType(key.tanIn.type) || isAutoTangentType(key.tanOut.type)) 
+            {	
+                bool hasPrev = index > 0;
+                bool hasNext = index < (int)curve.numKeys() - 1;
+                Keyframe prev, next;
+                if (hasPrev)
+                {
+                    prev.time = getTimeValue(curve, index-1); // curve.time(index - 1).as(MTime::kSeconds);
+                    prev.value = curve.value(index - 1);
+                }
+                if (hasNext)
+                {
+                    next.time = getTimeValue(curve, index+1); //curve.time(index + 1).as(MTime::kSeconds);
+                    next.value = curve.value(index + 1);
+                }
 
-            if (key.tanIn.type == TangentType::Auto)
-                autoTangent(true, key, hasPrev ? &prev : nullptr, hasNext ? &next : nullptr, interp, key.tanIn.x, key.tanIn.y);
-            
-            if (key.tanOut.type == TangentType::Auto)
-                autoTangent(false, key, hasPrev ? &prev : nullptr, hasNext ? &next : nullptr, interp, key.tanOut.x, key.tanOut.y);
+                CurveInterpolatorMethod interp = key.curveInterpolationMethod(isWeighted());
+
+                if (isAutoTangentType(key.tanIn.type))
+                    autoTangent(true, key.tanIn.type, key, hasPrev ? &prev : nullptr, hasNext ? &next : nullptr, interp, key.tanIn.x, key.tanIn.y);
+                
+                if (isAutoTangentType(key.tanOut.type))
+                    autoTangent(false, key.tanOut.type, key, hasPrev ? &prev : nullptr, hasNext ? &next : nullptr, interp, key.tanOut.x, key.tanOut.y);
+            }
         }
             
 
@@ -303,6 +330,9 @@ public:
         case MFnAnimCurve::kTangentPlateau: return TangentType::Plateau;
         case MFnAnimCurve::kTangentStepNext: return TangentType::StepNext;
         case MFnAnimCurve::kTangentAuto: return TangentType::Auto;
+        case MFnAnimCurve::kTangentAutoMix: return TangentType::AutoMix;
+        case MFnAnimCurve::kTangentAutoEase: return TangentType::AutoEase;
+        case MFnAnimCurve::kTangentAutoCustom: return TangentType::AutoEase; // not handling this...
         default:
             return TangentType::Clamped;
         }
@@ -352,6 +382,7 @@ public:
 protected:
     mutable std::unordered_map<double, double>  quaternionWcache;
     MObject fCurve;
+    bool fRecalcTangents{false};
 };
 
 /*!
@@ -410,7 +441,9 @@ bool findSiblingCurves(const MFnAnimCurve &curve, MObject &pcX, MObject &pcY, MO
 MStatus AnimXCommand::doIt(const MArgList &args)
 {
     MTime start(0.0), end(30.0), step(1.0);
-    MStatus status = parseArgs(args, start, end, step);
+    bool measureError;
+    bool recalcTangents;
+    MStatus status = parseArgs(args, start, end, step, measureError, recalcTangents);
 
     if (status != MS::kSuccess)
         return status;
@@ -432,7 +465,10 @@ MStatus AnimXCommand::doIt(const MArgList &args)
         return MS::kFailure;
     }
 
-    TparamCurveAccessor curveAPI(curve.name());
+    MString cmd = MString("import maya.cmds as cmds");
+    MGlobal::executePythonCommand(cmd);
+
+    TparamCurveAccessor curveAPI(curve.name(), recalcTangents);
     double value = 0.0;
     bool isRotation = false;
 
@@ -442,7 +478,8 @@ MStatus AnimXCommand::doIt(const MArgList &args)
     {
         isRotation = true;
     }
-        
+    bool unitlessInput = isUnitlessInputCurve(curve);                                                                                                  
+  
     TparamCurveAccessor x(MFnDependencyNode(pcX).name()), y(MFnDependencyNode(pcY).name()), z(MFnDependencyNode(pcZ).name());
 
     for (MTime t = start; t <= end; t += step)
@@ -461,16 +498,27 @@ MStatus AnimXCommand::doIt(const MArgList &args)
         }
         else
         {
-            value = adsk::evaluateCurve(t.as(MTime::kSeconds), curveAPI);
+            value = adsk::evaluateCurve(unitlessInput ? t.as(MTime::uiUnit()) : t.as(MTime::kSeconds), curveAPI);
         }
 
-        if (curve.animCurveType() == MFnAnimCurve::kAnimCurveUA ||
-            curve.animCurveType() == MFnAnimCurve::kAnimCurveTA)
-        {
-            value = MAngle::internalToUI(value);
-        }
+        if (measureError) {
+            // We evaluate the original curve using the Maya API and compare the result with the one from animx
+            // This directly compares the evaluated values without doing any conversion from radians to degrees
+            // or converting it to Python or Mel results.
+            double origValue = 0.0;
 
-        appendToResult(value);
+            if (unitlessInput)
+                curve.evaluate(t.as(MTime::uiUnit()), origValue);
+            else
+                curve.evaluate(t, origValue);
+    
+            appendToResult(origValue - value);
+        } else {
+            // We just use the value of the evaluated animX curve 
+            if (isAngleOutputCurve(curve))
+                value = MAngle::internalToUI(value);
+            appendToResult(value);
+        }
     }   
 
     return MS::kSuccess;

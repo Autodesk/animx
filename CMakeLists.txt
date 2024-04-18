@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.6)
 project(AnimX)
 
 # set( CMAKE_VERBOSE_MAKEFILE on )
-OPTION ( MAYA_64BIT_TIME_PRECISION "Use the library with a version of Maya including or after Maya after 2017 update 3" 0 )
+OPTION ( MAYA_64BIT_TIME_PRECISION "Use the library with a version of Maya including or after Maya after 2017 update 3" 1 )
 OPTION ( ANIMX_BUILD_MAYA_TESTSUITE "Build the Maya test suite" 1 )
 OPTION ( ANIMX_BUILD_STATIC "Build a static version of the AnimX library." 1 )
 OPTION ( ANIMX_BUILD_SHARED "Build a shared library version of the AnimX library." 1 )

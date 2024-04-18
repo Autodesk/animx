@@ -28,9 +28,9 @@ mkdir build; cd build
 cmake -G "Visual Studio 14 2015 Win64" -DMAYA_VERSION=2017 ..
 ```
 
-Note: By default this library assumes you're using the same 32-bit scheme to encode time used by Maya, in version up to Maya 2017 update 3. If you plan to use the library with a version of Maya including or after Maya after 2017 update 3, define the symbol MAYA_64BIT_TIME_PRECISION when building the library. For example, linux and OSX users would issue the command:
+Note: By default this library assumes you're using the same 64-bit scheme to encode time used by Maya. If you plan to use the library with a version of Maya before Maya 2017 update 3, define the symbol MAYA_64BIT_TIME_PRECISION when building the library. For example, linux and OSX users would issue the command:
 ```
-cmake -DMAYA_VERSION=2017 -DMAYA_64BIT_TIME_PRECISION=1 ..
+cmake -DMAYA_VERSION=2016 -DMAYA_64BIT_TIME_PRECISION=0 ..
 ```
 when following the steps described above.
 

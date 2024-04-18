@@ -2,7 +2,11 @@ set(SOURCE_FILES
 	"animationPlugin.cpp"
 )
 
-set(MAYA_LIBRARIES ${MAYA_LIBRARIES} AnimX)
+if (APPLE)
+    set(MAYA_LIBRARIES ${MAYA_LIBRARIES} ${CMAKE_BINARY_DIR}/src/libAnimX.dylib)
+else()
+    set(MAYA_LIBRARIES ${MAYA_LIBRARIES} AnimX)
+endif()
 
 find_package(Maya REQUIRED)
 set(MAYA_INCLUDE_DIR ${MAYA_INCLUDE_DIR} ${MAYA_ANIMATION_INCLUDE})

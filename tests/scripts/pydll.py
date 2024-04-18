@@ -79,7 +79,7 @@ def checkValue(i, api, scene, curve):
     v1 = round(api, precision)
     v2 = round(scene, precision)
     if v1 != v2:
-        print "Error. Mismatch for {}[{}]. API:{} vs. Maya:{}".format(curve, int(i), v1, v2)
+        print ("Error. Mismatch for {}[{}]. API:{} vs. Maya:{}".format(curve, int(i), v1, v2))
         return 1
     return 0
 
@@ -87,7 +87,7 @@ def checkValue(i, api, scene, curve):
 def verifyCurve(curve):
     """Test if a single animation curve evaluates to the same values using the library as it does in Maya"""
     if not cmds.objectType(curve, isAType='animCurve'):
-        print curve + ' is not a param curve'
+        print (curve + ' is not a param curve')
         return False
 
     # find out the time range of the curve
@@ -142,7 +142,7 @@ def verifyCurveQuaternion(curveX, curveY, curveZ):
     curves = [curveX, curveY, curveZ]
     for c in curves:
         if not cmds.objectType(c, isAType='animCurve'):
-            print c + ' is not a param curve'
+            print (c + ' is not a param curve')
             return 1
 
     # find out the time range of the curve
@@ -268,26 +268,26 @@ def testCurves():
 
     errors = 0
 
-    print '\nTESTING INFINITY MODES\n'
+    print ('\nTESTING INFINITY MODES\n')
 
     for inf in infinities:  
-        print "### Checking infinity mode: {}".format(inf)
+        print ("### Checking infinity mode: {}".format(inf))
         for curve in curves:            
             cmds.setInfinity(curve, pri=inf, poi=inf)               
             errors += verifyCurve(curve)
 
-    print '\nTESTING TANGENT TYPES\n'
+    print ('\nTESTING TANGENT TYPES\n')
 
     for tan in tangents:    
-        print "### Checking tangent: {}".format(tan)
+        print ("### Checking tangent: {}".format(tan))
         cmds.keyTangent(curves, edit=True, time=(':',), itt=tan, ott=tan)
         for curve in curves:
             errors += verifyCurve(curve)
     
-    print '\nTESTING INTERPOLATION MODES\n'
+    print ('\nTESTING INTERPOLATION MODES\n')
 
     for int in interpolation:   
-        print "### Checking interpolation mode: {}".format(int) 
+        print ("### Checking interpolation mode: {}".format(int))
         for curve in rotCurves:
             cmds.rotationInterpolation(curve, convert=int)
 
@@ -297,7 +297,7 @@ def testCurves():
         else:
             errors += verifyCurveQuaternion(rotCurves[0], rotCurves[1], rotCurves[2])
 
-    print "\nTotal errors: {}".format(errors)
+    print ("\nTotal errors: {}".format(errors))
 
 
 

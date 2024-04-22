@@ -2,6 +2,7 @@
 #define MATH_H
 
 #include "nurbs.h"
+#include <limits>
 
 namespace adsk
 {
